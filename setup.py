@@ -25,6 +25,7 @@ DEPENDENCIES = (
     # rsa==4.5 is the last version to support 2.7
     # https://github.com/sybrenstuvel/python-rsa/issues/152#issuecomment-643470233
     "rsa>=3.1.4,<5",
+    "ntplib>=0.4.0,<2.0.0",
 )
 
 extras = {
