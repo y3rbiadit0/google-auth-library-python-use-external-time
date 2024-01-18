@@ -39,6 +39,8 @@ You can also skip verification::
 .. _rfc7519: https://tools.ietf.org/html/rfc7519
 
 """
+import abc
+from typing import Literal
 
 try:
     from collections.abc import Mapping
@@ -185,7 +187,7 @@ def decode_header(token):
     return header
 
 
-def _verify_iat_and_exp(payload, clock_skew_in_seconds=0):
+def _verify_iat_and_exp(payload, clock_skew_in_seconds=0, time_source: Literal["system", "time_server"] = "system"):
     """Verifies the ``iat`` (Issued At) and ``exp`` (Expires) claims in a token
     payload.
 
@@ -198,7 +200,8 @@ def _verify_iat_and_exp(payload, clock_skew_in_seconds=0):
         google.auth.exceptions.InvalidValue: if value validation failed.
         google.auth.exceptions.MalformedError: if schema validation failed.
     """
-    now = _helpers.datetime_to_secs(_helpers.utcnow())
+    time_source = TimeInterface.time_source(time_source=time_source)
+    now = _helpers.datetime_to_secs(time_source.utcnow())
 
     # Make sure the iat and exp claims are present.
     for key in ("iat", "exp"):
@@ -294,7 +297,7 @@ def decode(token, certs=None, verify=True, audience=None, clock_skew_in_seconds=
 
     # Verify that the signature matches the message.
     if not crypt.verify_signature(
-        signed_section, signature, certs_to_check, verifier_cls
+            signed_section, signature, certs_to_check, verifier_cls
     ):
         raise exceptions.MalformedError("Could not verify token signature.")
 
@@ -369,14 +372,15 @@ class Credentials(
     """
 
     def __init__(
-        self,
-        signer,
-        issuer,
-        subject,
-        audience,
-        additional_claims=None,
-        token_lifetime=_DEFAULT_TOKEN_LIFETIME_SECS,
-        quota_project_id=None,
+            self,
+            signer,
+            issuer,
+            subject,
+            audience,
+            additional_claims=None,
+            token_lifetime=_DEFAULT_TOKEN_LIFETIME_SECS,
+            quota_project_id=None,
+            time_source: Literal["system", "time_server"] = "system",
     ):
         """
         Args:
@@ -391,6 +395,9 @@ class Credentials(
                 which the token is valid. Defaults to 1 hour.
             quota_project_id (Optional[str]): The project ID used for quota
                 and billing.
+            time_source (Literal["system", "time_server"]): The time source to generate
+                jwt-token.
+
         """
         super(Credentials, self).__init__()
         self._signer = signer
@@ -403,6 +410,7 @@ class Credentials(
         if additional_claims is None:
             additional_claims = {}
 
+        self._time_source = time_source
         self._additional_claims = additional_claims
 
     @classmethod
@@ -493,7 +501,7 @@ class Credentials(
         return cls(credentials.signer, audience=audience, **kwargs)
 
     def with_claims(
-        self, issuer=None, subject=None, audience=None, additional_claims=None
+            self, issuer=None, subject=None, audience=None, additional_claims=None
     ):
         """Returns a copy of these credentials with modified claims.
 
@@ -540,7 +548,8 @@ class Credentials(
         Returns:
             Tuple[bytes, datetime]: The encoded JWT and the expiration.
         """
-        now = _helpers.utcnow()
+        time_source = TimeInterface.time_source(self._time_source)
+        now = time_source.utcnow()
         lifetime = datetime.timedelta(seconds=self._token_lifetime)
         expiry = now + lifetime
 
@@ -610,14 +619,15 @@ class OnDemandCredentials(
     """
 
     def __init__(
-        self,
-        signer,
-        issuer,
-        subject,
-        additional_claims=None,
-        token_lifetime=_DEFAULT_TOKEN_LIFETIME_SECS,
-        max_cache_size=_DEFAULT_MAX_CACHE_SIZE,
-        quota_project_id=None,
+            self,
+            signer,
+            issuer,
+            subject,
+            additional_claims=None,
+            token_lifetime=_DEFAULT_TOKEN_LIFETIME_SECS,
+            max_cache_size=_DEFAULT_MAX_CACHE_SIZE,
+            quota_project_id=None,
+            time_source: Literal["system", "time_server"] = "system",
     ):
         """
         Args:
@@ -632,7 +642,8 @@ class OnDemandCredentials(
                 cache. Tokens are cached using :class:`cachetools.LRUCache`.
             quota_project_id (Optional[str]): The project ID used for quota
                 and billing.
-
+            time_source (Literal["system", "time_server"]): The time source to generate
+                jwt-token.
         """
         super(OnDemandCredentials, self).__init__()
         self._signer = signer
@@ -646,6 +657,7 @@ class OnDemandCredentials(
 
         self._additional_claims = additional_claims
         self._cache = cachetools.LRUCache(maxsize=max_cache_size)
+        self._time_source = time_source
 
     @classmethod
     def _from_signer_and_info(cls, signer, info, **kwargs):
@@ -787,7 +799,8 @@ class OnDemandCredentials(
         Returns:
             Tuple[bytes, datetime]: The encoded JWT and the expiration.
         """
-        now = _helpers.utcnow()
+        time_source = TimeInterface.time_source(self._time_source)
+        now = time_source.utcnow()
         lifetime = datetime.timedelta(seconds=self._token_lifetime)
         expiry = now + lifetime
 
@@ -819,8 +832,8 @@ class OnDemandCredentials(
             bytes: The encoded JWT.
         """
         token, expiry = self._cache.get(audience, (None, None))
-
-        if token is None or expiry < _helpers.utcnow():
+        time_source = TimeInterface.time_source(self._time_source)
+        if token is None or expiry < time_source.utcnow():
             token, expiry = self._make_jwt_for_audience(audience)
             self._cache[audience] = token, expiry
 
@@ -876,3 +889,48 @@ class OnDemandCredentials(
     @_helpers.copy_docstring(google.auth.credentials.Signing)
     def signer(self):
         return self._signer
+
+
+class TimeInterface:
+    """Interface for time source"""
+    def utcnow(self) -> datetime.datetime:
+        """Returns current time.
+        """
+        raise NotImplementedError()
+
+    @staticmethod
+    def time_source(time_source: Literal["system", "time_server"]) -> "TimeInterface":
+        """Returns time source"""
+        if time_source == "system":
+            return SystemTime()
+        elif time_source == "time_server":
+            return NTPTime()
+        else:
+            raise ValueError(f"Unknown time source: {time_source}")
+
+
+class SystemTime(TimeInterface):
+    """System time source.
+    """
+
+    def utcnow(self) -> datetime.datetime:
+        return _helpers.utcnow()
+
+
+class NTPTime(TimeInterface):
+    """NTP time source.
+    """
+
+    def __init__(self, ntp_server: str = "pool.ntp.org"):
+        """Initializes NTP time source.
+
+        Args:
+            ntp_server (str): NTP server address.
+        """
+        import ntplib
+        self._ntp_client = ntplib.NTPClient()
+        self._ntp_server = ntp_server
+
+    def utcnow(self) -> datetime.datetime:
+        response = self._ntp_client.request(self._ntp_server)
+        return datetime.datetime.fromtimestamp(response.tx_time)
