@@ -42,7 +42,7 @@ from google.auth import _helpers
 from google.auth import credentials
 from google.auth import exceptions
 from google.auth import metrics
-from google.oauth2 import reauth
+from google.oauth2 import reauth, token_helper
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -360,7 +360,7 @@ class Credentials(credentials.ReadOnlyScoped, credentials.CredentialsWithQuotaPr
                 raise exceptions.RefreshError(
                     "The refresh_handler returned expiry is not a datetime object."
                 )
-            if _helpers.utcnow() >= expiry - _helpers.REFRESH_THRESHOLD:
+            if token_helper.utcnow_timeserver() >= expiry - _helpers.REFRESH_THRESHOLD:
                 raise exceptions.RefreshError(
                     "The credentials returned by the refresh_handler are "
                     "already expired."

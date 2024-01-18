@@ -80,6 +80,7 @@ from google.auth import exceptions
 from google.auth import jwt
 from google.auth import metrics
 from google.oauth2 import _client
+from google.oauth2.token_helper import utcnow_timeserver
 
 _DEFAULT_TOKEN_LIFETIME_SECS = 3600  # 1 hour in seconds
 _DEFAULT_UNIVERSE_DOMAIN = "googleapis.com"
@@ -386,7 +387,7 @@ class Credentials(
         Returns:
             bytes: The authorization grant assertion.
         """
-        now = _helpers.utcnow()
+        now = utcnow_timeserver()
         lifetime = datetime.timedelta(seconds=_DEFAULT_TOKEN_LIFETIME_SECS)
         expiry = now + lifetime
 
@@ -736,7 +737,7 @@ class IDTokenCredentials(
         Returns:
             bytes: The authorization grant assertion.
         """
-        now = _helpers.utcnow()
+        now = utcnow_timeserver()
         lifetime = datetime.timedelta(seconds=_DEFAULT_TOKEN_LIFETIME_SECS)
         expiry = now + lifetime
 
